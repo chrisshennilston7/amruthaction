@@ -1,0 +1,32 @@
+name: Test gcp authentication
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  authenticate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER}}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up google Cloud CLI
+        uses: google-github-action/setup-gcloud@v2
+
+      - name: Verify Google Cloud identity
+        run: |
+          gcloud auth list
+          gcloud config set project "${{ vars.GCP_PROJECT_ID }}"
+          gcloud projects describe "${{ vars.GCP_PROJECT_ID }}"
+          
