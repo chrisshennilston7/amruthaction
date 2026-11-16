@@ -1,8 +1,61 @@
-name: Amruthworkflow
+name: Deploy staging to Cloud Run
+
 on:
   pull_request:
     types: [labeled]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION: us-central1
+  ARTIFACT_REPOSITORY: amruthaction
+  SERVICE: amruthaction-staging
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  deploy:
     if: contains(github.event.pull_request.labels.*.name, 'stage')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Ensure Artifact Registry repository exists
+        run: |
+          gcloud artifacts repositories describe "$ARTIFACT_REPOSITORY" --location="$REGION" >/dev/null 2>&1 ||           gcloud artifacts repositories create "$ARTIFACT_REPOSITORY" --repository-format=docker --location="$REGION"
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        env:
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPOSITORY }}/web:${{ github.event.pull_request.head.sha }}
+        run: |
+          docker build --tag "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy staging service
+        env:
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ env.ARTIFACT_REPOSITORY }}/web:${{ github.event.pull_request.head.sha }}
+        run: |
+          gcloud run deploy "$SERVICE" --image="$IMAGE" --region="$REGION" --platform=managed --allow-unauthenticated --quiet
+
+      - name: Show and test deployment
+        run: |
+          URL="$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')"
+          echo "### Staging deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+          curl --fail --retry 10 --retry-delay 5 "$URL"
