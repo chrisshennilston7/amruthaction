@@ -1,0 +1,32 @@
+name: Destroy GCP exercise environment
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  REGION: us-central1
+  ARTIFACT_REPOSITORY: amruthaction
+
+jobs:
+  destroy:
+    if: contains(github.event.pull_request.labels.*.name, 'destroy environment')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Delete Cloud Run services
+        run: |
+          gcloud run services delete amruthaction-staging --region="$REGION" --quiet || true
+          gcloud run services delete amruthaction-prod --region="$REGION" --quiet || true
+      - name: Delete exercise container images
+        run: |
+          gcloud artifacts repositories delete "$ARTIFACT_REPOSITORY" --location="$REGION" --quiet || true
